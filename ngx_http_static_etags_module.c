@@ -105,26 +105,46 @@ static ngx_int_t ngx_http_static_etags_init(ngx_conf_t *cf) {
     return NGX_OK;
 }
 
-static int ngx_http_static_etags_md5(unsigned int size, char *file, char *etag);
+static int ngx_http_static_etags_md5(unsigned int size, char *file, char *md5sum, ngx_log_t *log);
 
-static int ngx_http_static_etags_md5(unsigned int size, char *file, char *md5sum) {
-   FILE             *fp;
-   unsigned char    data[size];
+static int ngx_http_static_etags_md5(unsigned int size, char *file, char *md5sum, ngx_log_t *log) {
+   FILE             *fp = NULL;
+   char             data[4096];
    int              ret;
    int              j;
+   int              chunk_size = 4096;
+   int              chunks = 0;
+   int              left_over = 0;
+   unsigned int     fileLen;
    ngx_md5_t        md5;
    unsigned char    digest[16];
    u_char           hex[] = "0123456789abcdef";
 
-   fp = fopen((char *) file, "r");
-   ret = fread(&data, size, 1 ,fp);
-   if (ret == 0) {
-     return (int ) 1;
-   }
-   fclose(fp);
 
    ngx_md5_init(&md5);
-   ngx_md5_update(&md5, data, size);
+
+   fp = fopen((char *) file, "rb");
+   if (fp == NULL)
+     return (int ) 1;
+   fseek(fp, 0, SEEK_END);
+   fileLen = ftell(fp);
+   fseek(fp, 0, SEEK_SET);
+  
+   ngx_md5_init(&md5);
+   chunks = fileLen / chunk_size;
+   left_over = fileLen % chunk_size;
+   for (j = 0; j < chunks; j++) {
+     ret = fread(&data, chunk_size, 1 ,fp);
+     ngx_md5_update(&md5, data, chunk_size);
+   }
+
+   if(left_over) {
+     ret = fread(&data, left_over, 1 ,fp);
+     ngx_md5_update(&md5, data, left_over);
+   }
+   ngx_log_error(NGX_LOG_ERR, log, 0, " ");
+
+   fclose(fp);
    ngx_md5_final(digest, &md5);
 
    ngx_memzero(md5sum, 33);
@@ -151,14 +171,13 @@ static ngx_int_t ngx_http_static_etags_header_filter(ngx_http_request_t *r) {
     
     loc_conf = ngx_http_get_module_loc_conf( r, ngx_http_static_etags_module );
 
-    // Is the module active?
+
     if ( 1 == loc_conf->FileETag ) {
         p = ngx_http_map_uri_to_path( r, &path, &root, 0 );
         status = stat( (char *) path.data, &stat_result );
         if ( NULL == p ) {
             return NGX_HTTP_INTERNAL_SERVER_ERROR;
         }
-
         if ( 0 == status) {
           ngx_memzero(&new_string, 100);
           strcat(new_string, "\"");
@@ -166,14 +185,13 @@ static ngx_int_t ngx_http_static_etags_header_filter(ngx_http_request_t *r) {
           if (loc_conf->etag_options->MD5) {
             int       ret;
             char      md5sum[33];
-            ret = ngx_http_static_etags_md5((unsigned int) stat_result.st_size, (char *) path.data, (char *) &md5sum);
+            ret = ngx_http_static_etags_md5((unsigned int) stat_result.st_size, (char *) path.data, (char *) &md5sum, (ngx_log_t *) log);
             if (ret) {
               ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "MD5ERROR Return: %s", md5sum);
               return NGX_HTTP_INTERNAL_SERVER_ERROR;
             }
               strcat(new_string, (char *) md5sum);
           }
-
           if (loc_conf->etag_options->Size) {
             sprintf(buffer, "%x", (unsigned int) stat_result.st_size);
             strcat(new_string, (char *) buffer);
@@ -219,6 +237,11 @@ static ngx_int_t ngx_http_static_etags_header_filter(ngx_http_request_t *r) {
           r->headers_out.etag->value.len = strlen( new_string );
           r->headers_out.etag->value.data = (u_char *) new_string;
         }
+        else {
+          ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "Could not stat(): %s", path.data);
+          return NGX_HTTP_INTERNAL_SERVER_ERROR;
+
+        }
     }
 
     return ngx_http_next_header_filter(r);
@@ -247,7 +270,7 @@ static char * ngx_conf_set_etag(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) 
 
    option_c = cf->args->nelts;
      loc_conf->FileETag = 1;
-   if (option_c == 2) {
+   if (option_c == 1) {
      etag_out_format->Size = 1;
      etag_out_format->MTime = 1;
      etag_out_format->INode = 1;
@@ -267,7 +290,7 @@ static char * ngx_conf_set_etag(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) 
           option_set = 1;
           etag_out_format->INode = 1;
         }
-        else if(ngx_strncmp(cur_option->data, "MD5", 5) == 0) {
+        else if(ngx_strncmp(cur_option->data, "MD5", 3) == 0) {
           option_set = 1;
           etag_out_format->MD5 = 1;
         }
