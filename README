@@ -28,5 +28,3 @@ location /static {
 ** Notes
 -- MTime can differ from one backend server to the next, do not use MTime on 
    backend servers if you are loadbalancing.
--- MD5 reads the entire file at once, this might cause a large memory 
-   print and should be used on large files at your own risk

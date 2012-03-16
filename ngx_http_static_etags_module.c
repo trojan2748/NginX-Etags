@@ -142,7 +142,6 @@ static int ngx_http_static_etags_md5(unsigned int size, char *file, char *md5sum
      ret = fread(&data, left_over, 1 ,fp);
      ngx_md5_update(&md5, data, left_over);
    }
-   ngx_log_error(NGX_LOG_ERR, log, 0, " ");
 
    fclose(fp);
    ngx_md5_final(digest, &md5);
@@ -265,8 +264,6 @@ static char * ngx_conf_set_etag(ngx_conf_t *cf, ngx_command_t *cmd, void *conf) 
    else {
      loc_conf->etag_options = etag_out_format;
    }
-
-   loc_conf->etag_options = etag_out_format;
 
    option_c = cf->args->nelts;
      loc_conf->FileETag = 1;
